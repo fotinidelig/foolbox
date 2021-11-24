@@ -98,7 +98,7 @@ class BoundaryAttack(MinimizationAttack):
     ) -> T:
         raise_if_kwargs(kwargs)
         originals, restore_type = ep.astensor_(inputs)
-        del inputs, kwargs
+        del kwargs
 
         criterion = get_criterion(criterion)
         is_adversarial = get_is_adversarial(criterion, model)
