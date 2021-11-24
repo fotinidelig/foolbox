@@ -122,16 +122,15 @@ class BoundaryAttack(MinimizationAttack):
             best_advs = ep.astensor(starting_points)
 
         is_adv = is_adversarial(best_advs)
+        failed_indx = []
         if not is_adv.all():
-            failed = is_adv.logical_not().float32().sum()
+            failed = is_adv.logical_not().float32()
+            failed_indx = np.argwhere(failed == 0.0).flatten()
+            failed_num = failed.sum()
             if starting_points is None:
-                raise ValueError(
-                    f"init_attack failed for {failed} of {len(is_adv)} inputs"
-                )
+                print(f"init_attack failed for {failed_num} of {len(is_adv)} inputs")
             else:
-                raise ValueError(
-                    f"{failed} of {len(is_adv)} starting_points are not adversarial"
-                )
+                print(f"{failed_num} of {len(is_adv)} starting_points are not adversarial")
         del starting_points
 
         tb = TensorBoard(logdir=self.tensorboard)
@@ -276,7 +275,13 @@ class BoundaryAttack(MinimizationAttack):
             tb.histogram("spherical_step", spherical_steps, step)
             tb.histogram("source_step", source_steps, step)
         tb.close()
-        return restore_type(best_advs)
+
+        best_advs = restore_type(best_advs)
+
+        # restore failed nputs
+        for i in failed_indx:
+            best_advs[i] = inputs[i]
+        return best_advs
 
 
 class ArrayQueue:
