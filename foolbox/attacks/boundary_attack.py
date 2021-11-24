@@ -1,6 +1,8 @@
 from typing import Union, Tuple, Optional, Any
 from typing_extensions import Literal
 import numpy as np
+import torch
+import tensorflow as tf
 import eagerpy as ep
 import logging
 
@@ -124,8 +126,8 @@ class BoundaryAttack(MinimizationAttack):
         is_adv = is_adversarial(best_advs)
         failed_indx = []
         if not is_adv.all():
-            failed = is_adv.logical_not().float32()
-            failed_indx = np.argwhere(failed == 0.0).flatten()
+            failed = is_adv.logical_not().astype(int)
+            failed_indx = np.argwhere(failed == 1).flatten()
             failed_num = failed.sum()
             if starting_points is None:
                 print(f"init_attack failed for {failed_num} of {len(is_adv)} inputs")
@@ -133,8 +135,25 @@ class BoundaryAttack(MinimizationAttack):
                 print(f"{failed_num} of {len(is_adv)} starting_points are not adversarial")
         del starting_points
 
-        tb = TensorBoard(logdir=self.tensorboard)
+        # Remove failed init_attacks
+        if len(failed_indx) != 0:
+            new_originals = []
+            new_best_advs = []
+            new_criterion = []
+            for idx in range(len(best_advs)):
+                if idx not in failed_indx:
+                    new_best_advs.append(restore_type(best_advs[idx]))
+                    new_originals.append(restore_type(originals[idx]))
+                    new_criterion.append(restore_type(criterion.labels[idx]))
+            # set initial tensor type from list
+            del originals, best_advs, criterion, is_adversarial
+            criterion = ep.astensor(torch.tensor(new_criterion))
+            criterion = get_criterion(criterion)
+            is_adversarial = get_is_adversarial(criterion, model)
+            originals = ep.astensor(torch.stack(new_originals))
+            best_advs = ep.astensor(torch.stack(new_best_advs))
 
+        tb = TensorBoard(logdir=self.tensorboard)
         N = len(originals)
         ndim = originals.ndim
         spherical_steps = ep.ones(originals, N) * self.spherical_step
@@ -180,7 +199,6 @@ class BoundaryAttack(MinimizationAttack):
             )
             candidates.dtype == originals.dtype
             spherical_candidates.dtype == spherical_candidates.dtype
-
             is_adv = is_adversarial(candidates)
 
             spherical_is_adv: Optional[ep.Tensor]
@@ -279,9 +297,20 @@ class BoundaryAttack(MinimizationAttack):
         best_advs = restore_type(best_advs)
 
         # restore failed nputs
-        for i in failed_indx:
-            best_advs[i] = inputs[i]
-        return best_advs
+        final_best_advs = []
+        counter = 0
+        for idx in range(len(best_advs)+len(failed_indx)-1):
+            if idx in failed_indx:
+                final_best_advs.append(inputs[idx])
+            else:
+                final_best_advs.append(best_advs[counter])
+                counter += 1
+
+        if isinstance(inputs, torch.Tensor):
+            final_best_advs = torch.stack(final_best_advs)
+        else:
+            final_best_advs = tf.convert_to_tensor(final_best_advs)
+        return final_best_advs
 
 
 class ArrayQueue:
